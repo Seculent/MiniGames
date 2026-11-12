@@ -60,7 +60,9 @@ service cloud.firestore {
       allow create, update: if signedIn() && uid == me()
         && request.resource.data.nick is string
         && request.resource.data.nick.size() >= 2
-        && request.resource.data.nick.size() <= 20;
+        && request.resource.data.nick.size() <= 20
+        && (!('photo' in request.resource.data)
+            || (request.resource.data.photo is string && request.resource.data.photo.size() <= 40000));
       allow delete: if signedIn() && uid == me();
     }
 

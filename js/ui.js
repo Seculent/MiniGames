@@ -3,7 +3,7 @@ export const $ = (sel, root = document) => root.querySelector(sel);
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 export function avatarHTML(p) {
-  if (p && p.photo && /^https:\/\//.test(p.photo)) return `<img src="${esc(p.photo)}" alt="" referrerpolicy="no-referrer">`;
+  if (p && p.photo && (/^https:\/\//.test(p.photo) || /^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(p.photo))) return `<img src="${esc(p.photo)}" alt="" referrerpolicy="no-referrer">`;
   if (p && p.emoji) return `<span class="emo">${esc(p.emoji)}</span>`;
   const ch = (p && p.name ? p.name.trim()[0] : '?') || '?';
   return `<span class="ini">${esc(ch.toUpperCase())}</span>`;

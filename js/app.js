@@ -82,9 +82,10 @@ backend.onUser(async u => {
   try { prof = await backend.get('profiles/' + u.uid); }
   catch (e) { toast(errMsg(e)); }
   if (seq !== authSeq) return;
-  user = { ...u, googleName: u.name };
+  user = { ...u, googleName: u.name, googlePhoto: u.photo };
   needNick = !(prof && prof.nick);
   if (!needNick) user.name = prof.nick;
+  if (prof && typeof prof.photo === 'string') user.photo = prof.photo;
   renderTop();
   unsubTables = backend.onCol('tables', list => { tables = list; if (lobbyRefresh) lobbyRefresh(); },
     e => toast(errMsg(e)));
@@ -93,20 +94,29 @@ backend.onUser(async u => {
 });
 
 /* ---------- Никнейм ---------- */
-async function saveNick(nick) {
-  await backend.tx('profiles/' + user.uid, cur => ({ nick, createdAt: (cur && cur.createdAt) || SERVER_TIME, updatedAt: SERVER_TIME }));
-  user.name = nick;
-  // обновляем имя в статистике и за столом, где сидит игрок
-  await backend.tx('stats/' + user.uid, cur => (cur ? { ...cur, name: nick, updatedAt: SERVER_TIME } : undefined)).catch(() => {});
+// patch: { nick } и/или { photo } — photo: data URL, '' (без фото) или null (фото из Google)
+async function saveProfile(patch) {
+  await backend.tx('profiles/' + user.uid, cur => {
+    const p = { ...(cur || {}), ...patch, updatedAt: SERVER_TIME };
+    if (!p.createdAt) p.createdAt = SERVER_TIME;
+    if (patch.photo === null) delete p.photo;
+    return p;
+  });
+  if ('nick' in patch) user.name = patch.nick;
+  if ('photo' in patch) user.photo = patch.photo === null ? (user.googlePhoto || '') : patch.photo;
+  const name = user.name, photo = user.photo || '';
+  // обновляем имя и фото в статистике и за столом, где сидит игрок
+  await backend.tx('stats/' + user.uid, cur => (cur ? { ...cur, name, photo, updatedAt: SERVER_TIME } : undefined)).catch(() => {});
   for (const t of tables) if (seatOf(t, user.uid) >= 0) {
     await backend.tx('tables/' + t.id, cur => {
       const i = seatOf(cur, user.uid);
       if (i < 0) return undefined;
-      cur['p' + i].name = nick;
+      cur['p' + i].name = name; cur['p' + i].photo = photo;
       return cur;
     }).catch(() => {});
   }
 }
+const saveNick = nick => saveProfile({ nick });
 
 function renderNickSetup() {
   const suggestion = cleanNick((user.googleName || '').split(' ')[0]).slice(0, 20);
@@ -133,8 +143,12 @@ async function renderProfile() {
   main.innerHTML = `<div class="profile">
     <div class="tp-head"><a class="btn ghost" href="#/">← Лобби</a><h2>Профиль</h2></div>
     <div class="panel">
-      <div class="prof-top"><div class="ava lg">${avatarHTML(user)}</div><div><div class="prof-nick">${esc(user.name)}</div>
-        <div class="muted small">Google: ${esc(user.googleName || '')}</div></div></div>
+      <div class="prof-top"><button class="ava xl av-btn" id="avBtn" title="Сменить аватарку">${avatarHTML(user)}<span class="av-edit">✎</span></button>
+        <div><div class="prof-nick">${esc(user.name)}</div><div class="muted small">Google: ${esc(user.googleName || '')}</div>
+        <div class="av-actions"><button class="btn sm" id="avUpload">Загрузить фото</button>
+          ${user.googlePhoto && user.photo !== user.googlePhoto ? '<button class="btn ghost sm" id="avGoogle">Фото из Google</button>' : ''}
+          ${user.photo ? '<button class="btn ghost sm" id="avNone">Без фото</button>' : ''}</div>
+        <input type="file" id="avFile" accept="image/*" hidden></div></div>
       <form id="nickForm" class="prof-row"><label for="nickInput">Никнейм</label>
         <div class="row-in"><input class="txt" id="nickInput" maxlength="20" value="${esc(user.name)}"><button class="btn primary" type="submit">Сохранить</button></div>
         <div class="field-err" id="nickErr"></div></form>
@@ -158,6 +172,22 @@ async function renderProfile() {
     catch (er) { $('#nickErr').textContent = errMsg(er); }
   };
   $('#delBtn').onclick = deleteAccount;
+  const setPhoto = async (photo, msg) => {
+    try { await saveProfile({ photo }); renderTop(); toast(msg); renderProfile(); }
+    catch (e) { toast(errMsg(e)); }
+  };
+  $('#avBtn').onclick = $('#avUpload').onclick = () => $('#avFile').click();
+  $('#avFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      const { openAvatarEditor } = await import('./avatar-editor.js');
+      const data = await openAvatarEditor(f);
+      if (data) await setPhoto(data, 'Аватарка обновлена');
+    } catch (er) { toast(er.message || 'Не удалось открыть изображение'); }
+  };
+  if ($('#avGoogle')) $('#avGoogle').onclick = () => setPhoto(null, 'Вернули фото из Google');
+  if ($('#avNone')) $('#avNone').onclick = () => setPhoto('', 'Аватарка убрана');
   try {
     const s = await stats.mine(user);
     if ($('#profStats')) $('#profStats').innerHTML = statsLines(s) || '<p class="muted">Пока ни одной партии.</p>';
