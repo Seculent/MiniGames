@@ -58,6 +58,10 @@ export const backend = {
       return next;
     });
   },
+  async list(col) {
+    const s = await getDocs(collection(db, col));
+    return s.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
   async top(col, field, n) {
     const s = await getDocs(query(collection(db, col), orderBy(field, 'desc'), limit(n)));
     return s.docs.map(d => ({ id: d.id, ...d.data() }));

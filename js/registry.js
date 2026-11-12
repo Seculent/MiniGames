@@ -14,8 +14,9 @@ export const GAMES = [
     id: 'battleship',
     title: 'Морской бой',
     icon: '🚢',
-    desc: 'Скоро.',
-    soon: true,
+    desc: 'Классика 10×10: расставь флот и потопи корабли соперника первым.',
+    tables: 2,
+    load: () => import('./games/battleship/index.js'),
   },
 ];
 export const gameById = id => GAMES.find(g => g.id === id);

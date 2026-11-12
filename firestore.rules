@@ -36,13 +36,27 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Админы: документ admins/{uid} создаётся вручную в консоли Firebase
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    match /admins/{uid} {
+      allow read: if signedIn() && uid == me();
+      allow write: if false;
+    }
+
     match /stats/{uid} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && uid == me()
+      allow create, update: if isAdmin() || (signedIn() && uid == me()
         && request.resource.data.name is string
         && request.resource.data.totalWins is int
-        && request.resource.data.totalWins <= (resource == null ? 0 : resource.data.get('totalWins', 0)) + 1;
+        && request.resource.data.totalWins <= (resource == null ? 0 : resource.data.get('totalWins', 0)) + 1);
       allow delete: if false;
+    }
+
+    // Расстановка флота в «Морском бое»: видит и меняет только сам игрок
+    match /fleets/{uid} {
+      allow read, write: if signedIn() && uid == me();
     }
   }
 }

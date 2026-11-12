@@ -37,7 +37,7 @@ export function turnText(s, mySeat, names) {
 
 // Онлайн: экран партии, ходы отправляет onMove
 export function mountOnline(root, { onMove }) {
-  return mountGame(root, { onCell: r => onMove(r) });
+  return mountGame(root, { onCell: r => Promise.resolve(onMove(r)).catch(() => {}) });
 }
 
 // ---------- Одиночная игра против енота ----------

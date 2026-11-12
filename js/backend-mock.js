@@ -50,6 +50,10 @@ export const backend = {
     if (next !== undefined) { const fresh = load(); fresh[path] = prepare(next, Date.now()); save(fresh); emit(); }
     return next;
   },
+  async list(col) {
+    const db = load();
+    return Object.keys(db).filter(k => k.startsWith(col + '/') && k.split('/').length === 2).map(k => ({ id: k.split('/').pop(), ...clone(db[k]) }));
+  },
   async top(col, field, n) {
     const db = load();
     const get = (o, f) => f.split('.').reduce((a, k) => (a == null ? a : a[k]), o);

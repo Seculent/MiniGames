@@ -105,7 +105,7 @@ function tableInfo(t) {
 function renderLobby() {
   main.innerHTML = `<div class="lobby"><div class="games" id="games"></div>
     <aside class="panel leaders"><div class="lb-head"><h2>Таблица лидеров</h2><button class="btn ghost sm" id="lbReload" title="Обновить">↻</button></div>
-    <div class="tabs" id="lbTabs"></div><div id="lbList" class="lb-list"><p class="muted">Загрузка…</p></div><div id="myStats" class="mystats"></div></aside></div>`;
+    <div class="tabs" id="lbTabs"></div><div id="lbList" class="lb-list"><p class="muted">Загрузка…</p></div><div id="myStats" class="mystats"></div><div id="backupBox" class="mystats"></div></aside></div>`;
   const open = openSet();
   const drawGames = () => {
     const myTable = tables.find(t => seatOf(t, user.uid) >= 0 && seatAlive(t['p' + seatOf(t, user.uid)]));
@@ -180,6 +180,47 @@ function renderLobby() {
   }
   drawTabs(); loadLb();
   $('#lbReload').onclick = loadLb;
+  renderBackup();
+}
+
+/* ---------- Бэкап сохранений (виден только админу) ---------- */
+async function renderBackup() {
+  const box = $('#backupBox');
+  if (!box) return;
+  box.innerHTML = `<div class="small muted">Ваш ID: <code id="myUid">${esc(user.uid)}</code> <button class="btn ghost sm" id="copyUid">копировать</button></div>`;
+  $('#copyUid').onclick = async () => {
+    try { await navigator.clipboard.writeText(user.uid); toast('ID скопирован'); } catch (e) { toast('Не удалось скопировать'); }
+  };
+  if (!(await stats.isAdmin(user)) || !$('#backupBox')) return;
+  box.insertAdjacentHTML('afterbegin', `<h3>Бэкап сохранений</h3>
+    <p class="small muted">Онлайн-статистика всех игроков (игры против людей). Игры против енота в бэкап не входят.</p>
+    <div class="gc-actions"><button class="btn sm" id="bkDown">⬇ Скачать бэкап</button><button class="btn sm ghost" id="bkUp">⬆ Восстановить из файла</button>
+    <input type="file" id="bkFile" accept=".json,application/json" hidden></div>`);
+  $('#bkDown').onclick = async () => {
+    try {
+      const data = await stats.exportAll();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `igroteka-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast(`Сохранено игроков: ${data.players.length}`);
+    } catch (e) { toast(errMsg(e)); }
+  };
+  $('#bkUp').onclick = () => $('#bkFile').click();
+  $('#bkFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      const players = stats.validateBackup(JSON.parse(await f.text()));
+      if (!players.length) throw new Error('В файле нет игроков');
+      if (!(await confirmBox('Восстановить бэкап?', `Игроков в файле: ${players.length}. Их онлайн-статистика будет заменена данными из файла. Остальные игроки и результаты против енота не изменятся.`, 'Восстановить'))) return;
+      const n = await stats.restore(players);
+      toast(`Восстановлено игроков: ${n}`);
+      if (lobbyRefresh) renderLobby();
+    } catch (err) { toast(err instanceof SyntaxError ? 'Файл повреждён' : errMsg(err)); }
+  };
 }
 
 async function joinTable(id, myTable) {
@@ -226,6 +267,10 @@ async function renderTable(id) {
   $('#rulesBtn').onclick = () => showRules(gameId);
 
   let t = null, gameView = null, viewSeed = null, pending = false, mode = '', lastNote = '';
+  const secret = {
+    load: () => backend.get('fleets/' + user.uid),
+    save: d => backend.tx('fleets/' + user.uid, () => d),
+  };
   const animated = new Set(JSON.parse(sessionStorage.getItem('coin-animated') || '[]'));
   const recorded = new Set(JSON.parse(sessionStorage.getItem('recorded') || '[]'));
 
@@ -322,10 +367,12 @@ async function renderTable(id) {
 
     // playing / finished
     if (!st) { body.innerHTML = '<div class="panel center">Загрузка партии…</div>'; return; }
-    if (mode !== 'game' || !gameView || viewSeed !== st.seed) {
+    const vkey = t.gid + ':' + i;
+    if (mode !== 'game' || !gameView || viewSeed !== vkey) {
+      if (gameView && gameView.destroy) gameView.destroy();
       body.innerHTML = '<div id="gv"></div>';
-      gameView = mod.mountOnline($('#gv'), { onMove: doMove });
-      viewSeed = st.seed; mode = 'game'; lastNote = '';
+      gameView = mod.mountOnline($('#gv'), { onMove: doMove, mySeat: seated ? i : null, gid: t.gid, secret });
+      viewSeed = vkey; mode = 'game'; lastNote = '';
     }
     const nm = names();
     const players = [0, 1].map(k => {
@@ -373,14 +420,14 @@ async function renderTable(id) {
     if (cb) cb.onclick = () => ops.claimTimeout(id, user.uid).catch(e => toast(errMsg(e)));
   }
 
-  async function doMove(move) {
-    if (pending) return;
+  // Возвращает промис; при ошибке он отклоняется (игра может повторить попытку)
+  async function doMove(move, o = {}) {
+    if (pending) throw new Error('busy');
     pending = true; draw(true);
     try { await ops.move(id, user.uid, move, mod); }
-    catch (e) { toast(errMsg(e)); }
+    catch (e) { if (!o.quiet) toast(errMsg(e)); throw e; }
     finally { pending = false; draw(true); }
-  }
-}
+  }}
 
 /* ---------- Одиночная игра ---------- */
 async function renderSolo(gameId) {

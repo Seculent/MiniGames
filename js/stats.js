@@ -31,6 +31,42 @@ export function createStats(backend, SERVER_TIME) {
       });
     },
     mine(u) { return backend.get('stats/' + u.uid); },
+    // Бэкап: только онлайн-статистика (игры против человека), без соло
+    async exportAll() {
+      const list = await backend.list('stats');
+      return {
+        app: 'igroteka', v: 1, exported: new Date().toISOString(),
+        players: list.map(s => ({ uid: s.id, name: s.name || '', photo: s.photo || '', wins: s.wins || {},
+          totalWins: s.totalWins || 0, games: s.games || {}, recent: s.recent || [] })),
+      };
+    },
+    validateBackup(o) {
+      if (!o || o.app !== 'igroteka' || !Array.isArray(o.players)) throw new Error('Это не файл бэкапа Игротеки');
+      const num = x => (Number.isInteger(x) && x >= 0 ? x : 0);
+      const cleanGames = g => {
+        const out = {};
+        for (const [k, v] of Object.entries(g || {})) if (/^[A-Za-z]+$/.test(k) && v && typeof v === 'object') out[k] = { w: num(v.w), l: num(v.l), d: num(v.d) };
+        return out;
+      };
+      return o.players.filter(p => p && typeof p.uid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(p.uid)).map(p => {
+        const games = cleanGames(p.games), wins = {};
+        let total = 0;
+        for (const [k, v] of Object.entries(games)) { wins[k] = v.w; total += v.w; }
+        return { uid: p.uid, name: String(p.name || 'Игрок').slice(0, 40), photo: /^https:\/\//.test(p.photo || '') ? p.photo : '',
+          games, wins, totalWins: total, recent: Array.isArray(p.recent) ? p.recent.filter(x => typeof x === 'string').slice(0, 20) : [] };
+      });
+    },
+    // Восстановление (только админ): онлайн-часть перезаписывается, соло-результаты сохраняются как есть
+    async restore(players) {
+      let done = 0;
+      for (const p of players) {
+        await backend.tx('stats/' + p.uid, cur => ({ name: p.name, photo: p.photo, wins: p.wins, totalWins: p.totalWins,
+          games: p.games, recent: p.recent, solo: (cur && cur.solo) || {}, updatedAt: SERVER_TIME }));
+        done++;
+      }
+      return done;
+    },
+    async isAdmin(u) { try { return !!(await backend.get('admins/' + u.uid)); } catch (e) { return false; } },
     top(field, n = 20) { return backend.top('stats', field, n); },
   };
 }

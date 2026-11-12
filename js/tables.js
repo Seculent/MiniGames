@@ -106,7 +106,8 @@ export function createTableOps(backend, SERVER_TIME) {
       return backend.tx(path(id), t => {
         const i = seatOf(t, uid);
         if (i < 0) throw new Error('Вы не за этим столом');
-        if (t.status !== 'playing' || !t.state) throw new Error('Партия не идёт');
+        const post = t.status === 'finished' && t.state && game.postGameMove && game.postGameMove(move);
+        if ((t.status !== 'playing' && !post) || !t.state) throw new Error('Партия не идёт');
         t.state = game.applyMove(t.state, i, move);
         if (t.state.over) t.status = 'finished';
         return touch(t);
