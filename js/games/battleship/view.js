@@ -154,6 +154,7 @@ export function mountOnline(root, { onMove, mySeat, gid, secret }) {
       await secret.save({ gid, ships: draft, salt });
       fleet = draft; fleetReady = true;
       await onMove({ t: 'ready', commit });
+      try { localStorage.removeItem(draftKey); } catch (e) {}
     } catch (e) { toastFn('Не удалось сохранить расстановку'); }
     busy = false;
   }

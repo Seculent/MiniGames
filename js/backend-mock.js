@@ -43,6 +43,8 @@ export const backend = {
     return () => listeners.delete(l);
   },
   async get(path) { return clone(load()[path] ?? null); },
+  async del(path) { const db = load(); delete db[path]; save(db); emit(); },
+  async deleteUser() { await this.signOut(); },
   async tx(path, fn) {
     await new Promise(r => setTimeout(r, 30));
     const db = load();

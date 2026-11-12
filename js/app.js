@@ -21,7 +21,16 @@ try {
 const ops = createTableOps(backend, SERVER_TIME);
 const stats = createStats(backend, SERVER_TIME);
 
-let user = null, tables = [], unsubTables = null, cleanup = null, lobbyRefresh = null;
+let user = null, tables = [], unsubTables = null, cleanup = null, lobbyRefresh = null, needNick = false;
+
+// Никнейм: 2–20 символов, буквы, цифры, пробел, точка, дефис, подчёркивание
+function cleanNick(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function nickError(s) {
+  if (s.length < 2) return 'Слишком короткий ник: нужно хотя бы 2 символа';
+  if (s.length > 20) return 'Слишком длинный ник: не больше 20 символов';
+  if (!/^[\p{L}\p{N} ._-]+$/u.test(s)) return 'Можно только буквы, цифры, пробел, точку, дефис и подчёркивание';
+  return '';
+}
 
 function errMsg(e) {
   const c = e && e.code;
@@ -36,14 +45,15 @@ function errMsg(e) {
 function renderTop() {
   const box = $('#userbox');
   if (!user) { box.innerHTML = ''; return; }
-  box.innerHTML = `<span class="ava sm">${avatarHTML(user)}</span><span class="uname">${esc(user.name)}</span>
+  box.innerHTML = `<a class="profile-chip" href="#/me" title="Профиль"><span class="ava sm">${avatarHTML(user)}</span><span class="uname">${esc(needNick ? '' : user.name)}</span></a>
     <button class="btn ghost sm" id="logout">Выйти</button>`;
-  $('#logout').onclick = async () => {
-    const mine = tables.find(t => seatOf(t, user.uid) >= 0);
-    if (mine && !(await confirmBox('Выйти?', 'Вы сидите за столом. Место освободится, а незаконченная партия будет проиграна.', 'Выйти'))) return;
-    if (mine) await leaveTable(mine.id, true);
-    backend.signOut();
-  };
+  $('#logout').onclick = logout;
+}
+async function logout() {
+  const mine = tables.find(t => seatOf(t, user.uid) >= 0);
+  if (mine && !(await confirmBox('Выйти?', 'Вы сидите за столом. Место освободится, а незаконченная партия будет проиграна.', 'Выйти'))) return;
+  if (mine) await leaveTable(mine.id, true);
+  backend.signOut();
 }
 
 /* ---------- Роутинг ---------- */
@@ -52,25 +62,132 @@ function route() {
   lobbyRefresh = null;
   window.scrollTo(0, 0);
   if (!user) return renderLogin();
+  if (needNick) return renderNickSetup();
   const h = location.hash.replace(/^#\/?/, '');
   const [kind, arg] = h.split('/');
   if (kind === 't' && arg) return renderTable(decodeURIComponent(arg));
   if (kind === 'solo' && arg) return renderSolo(decodeURIComponent(arg));
+  if (kind === 'me') return renderProfile();
   renderLobby();
 }
 window.addEventListener('hashchange', route);
 
-backend.onUser(u => {
-  user = u;
-  renderTop();
+let authSeq = 0;
+backend.onUser(async u => {
+  const seq = ++authSeq;
   if (unsubTables) { unsubTables(); unsubTables = null; }
-  if (u) {
-    unsubTables = backend.onCol('tables', list => { tables = list; if (lobbyRefresh) lobbyRefresh(); },
-      e => toast(errMsg(e)));
-    for (const g of GAMES) if (!g.soon && g.tables) ops.ensure(g.id, g.tables).catch(e => console.warn('ensure tables', e));
-  }
+  if (!u) { user = null; needNick = false; renderTop(); route(); return; }
+  main.innerHTML = '<div class="panel center narrow">Загрузка профиля…</div>';
+  let prof = null;
+  try { prof = await backend.get('profiles/' + u.uid); }
+  catch (e) { toast(errMsg(e)); }
+  if (seq !== authSeq) return;
+  user = { ...u, googleName: u.name };
+  needNick = !(prof && prof.nick);
+  if (!needNick) user.name = prof.nick;
+  renderTop();
+  unsubTables = backend.onCol('tables', list => { tables = list; if (lobbyRefresh) lobbyRefresh(); },
+    e => toast(errMsg(e)));
+  for (const g of GAMES) if (!g.soon && g.tables) ops.ensure(g.id, g.tables).catch(e => console.warn('ensure tables', e));
   route();
 });
+
+/* ---------- Никнейм ---------- */
+async function saveNick(nick) {
+  await backend.tx('profiles/' + user.uid, cur => ({ nick, createdAt: (cur && cur.createdAt) || SERVER_TIME, updatedAt: SERVER_TIME }));
+  user.name = nick;
+  // обновляем имя в статистике и за столом, где сидит игрок
+  await backend.tx('stats/' + user.uid, cur => (cur ? { ...cur, name: nick, updatedAt: SERVER_TIME } : undefined)).catch(() => {});
+  for (const t of tables) if (seatOf(t, user.uid) >= 0) {
+    await backend.tx('tables/' + t.id, cur => {
+      const i = seatOf(cur, user.uid);
+      if (i < 0) return undefined;
+      cur['p' + i].name = nick;
+      return cur;
+    }).catch(() => {});
+  }
+}
+
+function renderNickSetup() {
+  const suggestion = cleanNick((user.googleName || '').split(' ')[0]).slice(0, 20);
+  main.innerHTML = `<div class="panel narrow center nick-setup">
+    <div class="ava lg" style="margin:0 auto 10px">${avatarHTML(user)}</div>
+    <h2>Как вас называть?</h2>
+    <p class="muted">Этот ник увидят соперники за столом и в таблице лидеров. Поменять его можно в профиле.</p>
+    <form id="nickForm"><input class="txt" id="nickInput" maxlength="20" autocomplete="nickname" value="${esc(suggestion)}" placeholder="Ваш ник">
+    <div class="field-err" id="nickErr"></div>
+    <button class="btn primary big" type="submit">Продолжить</button></form></div>`;
+  const inp = $('#nickInput'); inp.focus(); inp.select();
+  $('#nickForm').onsubmit = async e => {
+    e.preventDefault();
+    const nick = cleanNick(inp.value), err = nickError(nick);
+    $('#nickErr').textContent = err;
+    if (err) return;
+    try { await saveNick(nick); needNick = false; renderTop(); route(); }
+    catch (er) { $('#nickErr').textContent = errMsg(er); }
+  };
+}
+
+/* ---------- Профиль ---------- */
+async function renderProfile() {
+  main.innerHTML = `<div class="profile">
+    <div class="tp-head"><a class="btn ghost" href="#/">← Лобби</a><h2>Профиль</h2></div>
+    <div class="panel">
+      <div class="prof-top"><div class="ava lg">${avatarHTML(user)}</div><div><div class="prof-nick">${esc(user.name)}</div>
+        <div class="muted small">Google: ${esc(user.googleName || '')}</div></div></div>
+      <form id="nickForm" class="prof-row"><label for="nickInput">Никнейм</label>
+        <div class="row-in"><input class="txt" id="nickInput" maxlength="20" value="${esc(user.name)}"><button class="btn primary" type="submit">Сохранить</button></div>
+        <div class="field-err" id="nickErr"></div></form>
+      <div class="prof-row"><label>Ваш ID</label><div class="row-in"><code class="uid">${esc(user.uid)}</code><button class="btn ghost sm" id="copyUid">Копировать</button></div>
+        <div class="muted small">Нужен, например, чтобы назначить админа в Firebase.</div></div>
+    </div>
+    <div class="panel"><h3>Статистика</h3><div id="profStats" class="mystats">Загрузка…</div></div>
+    <div class="panel danger"><h3>Удаление аккаунта</h3>
+      <p class="muted small">Будут удалены ваш ник, вся статистика и сохранённые расстановки, вы пропадёте из таблицы лидеров. Отменить нельзя.</p>
+      <div class="gc-actions"><button class="btn" id="logoutBtn">Выйти</button><button class="btn danger-btn" id="delBtn">Удалить аккаунт</button></div></div>
+  </div>`;
+  $('#copyUid').onclick = async () => { try { await navigator.clipboard.writeText(user.uid); toast('ID скопирован'); } catch (e) { toast('Не удалось скопировать'); } };
+  $('#logoutBtn').onclick = logout;
+  $('#nickForm').onsubmit = async e => {
+    e.preventDefault();
+    const nick = cleanNick($('#nickInput').value), err = nickError(nick);
+    $('#nickErr').textContent = err;
+    if (err) return;
+    if (nick === user.name) { toast('Ник не изменился'); return; }
+    try { await saveNick(nick); renderTop(); toast('Ник сохранён'); if (location.hash === '#/me') renderProfile(); }
+    catch (er) { $('#nickErr').textContent = errMsg(er); }
+  };
+  $('#delBtn').onclick = deleteAccount;
+  try {
+    const s = await stats.mine(user);
+    if ($('#profStats')) $('#profStats').innerHTML = statsLines(s) || '<p class="muted">Пока ни одной партии.</p>';
+  } catch (e) { if ($('#profStats')) $('#profStats').textContent = errMsg(e); }
+}
+
+async function deleteAccount() {
+  if (!(await confirmBox('Удалить аккаунт?', 'Ник, статистика и победы будут удалены навсегда, вы пропадёте из таблицы лидеров.', 'Удалить навсегда'))) return;
+  const btn = $('#delBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Удаляем…'; }
+  try {
+    for (const t of tables.filter(x => seatOf(x, user.uid) >= 0)) await leaveTable(t.id, true).catch(() => {});
+    for (const p of ['fleets/', 'stats/', 'profiles/']) await backend.del(p + user.uid);
+    await backend.deleteUser();
+    toast('Аккаунт удалён');
+    location.hash = '#/';
+  } catch (e) {
+    toast(errMsg(e));
+    if (btn) { btn.disabled = false; btn.textContent = 'Удалить аккаунт'; }
+  }
+}
+
+function statsLines(s) {
+  if (!s) return '';
+  return GAMES.filter(g => !g.soon).map(g => {
+    const o = (s.games || {})[g.id] || {}, solo = (s.solo || {})[g.id] || {};
+    const sw = ['easy', 'normal', 'hard'].reduce((a, k) => a + ((solo[k] || {}).w || 0), 0);
+    const w = o.w || 0, l = o.l || 0, d = o.d || 0;
+    return `<div><b>${esc(g.title)}</b>: онлайн ${w} ${plural(w, 'победа', 'победы', 'побед')}, ${l} ${plural(l, 'поражение', 'поражения', 'поражений')}${d ? `, ${d} ${plural(d, 'ничья', 'ничьи', 'ничьих')}` : ''}${g.solo ? ` · енот повержен ${sw} ${plural(sw, 'раз', 'раза', 'раз')}` : ''}</div>`;
+  }).join('');
+}
 
 /* ---------- Вход ---------- */
 function renderLogin() {
@@ -169,13 +286,7 @@ function renderLobby() {
       const s = await stats.mine(user);
       const el = $('#myStats'); if (!el) return;
       if (!s) { el.innerHTML = '<p class="muted small">Ваши победы появятся здесь после первой партии.</p>'; return; }
-      const lines = GAMES.filter(g => !g.soon).map(g => {
-        const o = (s.games || {})[g.id] || {}, solo = (s.solo || {})[g.id] || {};
-        const sw = ['easy', 'normal', 'hard'].reduce((a, k) => a + ((solo[k] || {}).w || 0), 0);
-        const w = o.w || 0, l = o.l || 0, d = o.d || 0;
-        return `<div><b>${esc(g.title)}</b>: онлайн ${w} ${plural(w, 'победа', 'победы', 'побед')}, ${l} ${plural(l, 'поражение', 'поражения', 'поражений')}${d ? `, ${d} ${plural(d, 'ничья', 'ничьи', 'ничьих')}` : ''}${g.solo ? ` · енот повержен ${sw} ${plural(sw, 'раз', 'раза', 'раз')}` : ''}</div>`;
-      }).join('');
-      el.innerHTML = `<h3>Мои результаты</h3>${lines}`;
+      el.innerHTML = `<h3>Мои результаты</h3>${statsLines(s)}`;
     } catch (e) {}
   }
   drawTabs(); loadLb();
@@ -187,10 +298,7 @@ function renderLobby() {
 async function renderBackup() {
   const box = $('#backupBox');
   if (!box) return;
-  box.innerHTML = `<div class="small muted">Ваш ID: <code id="myUid">${esc(user.uid)}</code> <button class="btn ghost sm" id="copyUid">копировать</button></div>`;
-  $('#copyUid').onclick = async () => {
-    try { await navigator.clipboard.writeText(user.uid); toast('ID скопирован'); } catch (e) { toast('Не удалось скопировать'); }
-  };
+  box.innerHTML = '';
   if (!(await stats.isAdmin(user)) || !$('#backupBox')) return;
   box.insertAdjacentHTML('afterbegin', `<h3>Бэкап сохранений</h3>
     <p class="small muted">Онлайн-статистика всех игроков (игры против людей). Игры против енота в бэкап не входят.</p>

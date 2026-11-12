@@ -164,6 +164,26 @@ h2{margin:0;font-size:20px} h3{margin:0 0 10px}
 .cs-turn{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;min-height:28px;font-weight:800;color:#14302a;text-align:center;font-size:15px}
 .cs-turn .chip{width:18px;height:18px;border-radius:5px;border:2px solid rgba(0,0,0,.35);flex:none}
 
+/* ник и профиль */
+.profile-chip{display:flex;align-items:center;gap:8px;text-decoration:none;padding:3px 10px 3px 3px;border-radius:12px;border:1px solid transparent}
+.profile-chip:hover{border-color:var(--stroke);background:var(--panel2)}
+.txt{width:100%;background:#0f2a2d;border:1px solid var(--stroke);border-radius:12px;padding:11px 12px;font-size:16px;color:var(--text)}
+.txt:focus{outline:2px solid var(--accent);outline-offset:1px}
+.field-err{color:var(--bad);font-size:13px;min-height:18px;margin:6px 0}
+.nick-setup{max-width:440px}
+.nick-setup form{margin-top:14px}
+.profile{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.profile .tp-head{margin-bottom:0}
+.prof-top{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.prof-nick{font-size:24px;font-weight:900}
+.prof-row{margin-top:12px}
+.prof-row label{display:block;font-size:13px;color:var(--muted);font-weight:800;margin-bottom:6px}
+.row-in{display:flex;gap:8px;align-items:center}
+.uid{background:#0b1f1c;border:1px solid var(--stroke);border-radius:10px;padding:8px 10px;font-size:13px;word-break:break-all;flex:1}
+.panel.danger{border-color:#6b2d2a}
+.danger-btn{background:#7a2b22;border-color:#a33}
+.danger-btn:hover{background:#963428}
+
 /* окна */
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#0b1f1c;border:1px solid var(--stroke);padding:10px 16px;border-radius:12px;font-weight:700;opacity:0;transition:.25s;pointer-events:none;max-width:92vw;text-align:center;z-index:80}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}

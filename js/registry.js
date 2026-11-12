@@ -16,6 +16,7 @@ export const GAMES = [
     icon: '🚢',
     desc: 'Классика 10×10: расставь флот и потопи корабли соперника первым.',
     tables: 2,
+    solo: 'Против енота',
     load: () => import('./games/battleship/index.js'),
   },
 ];

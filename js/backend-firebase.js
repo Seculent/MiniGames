@@ -1,8 +1,9 @@
 // Доступ к Firebase: вход через Google и база Firestore.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut as fbSignOut }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut as fbSignOut,
+  deleteUser, reauthenticateWithPopup }
   from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js';
-import { getFirestore, doc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit, getDocs, getDoc }
+import { getFirestore, doc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit, getDocs, getDoc, deleteDoc }
   from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
 
@@ -38,6 +39,19 @@ export const backend = {
     }
   },
   signOut() { return fbSignOut(auth); },
+  del(path) { return deleteDoc(doc(db, path)); },
+  // Удаление аккаунта Firebase; если вход был давно, Google попросит подтвердить вход
+  async deleteUser() {
+    const u = auth.currentUser;
+    if (!u) return;
+    try { await deleteUser(u); }
+    catch (e) {
+      if (e && e.code === 'auth/requires-recent-login') {
+        await reauthenticateWithPopup(u, new GoogleAuthProvider());
+        await deleteUser(u);
+      } else throw e;
+    }
+  },
   onDoc(path, cb, err) {
     return onSnapshot(doc(db, path), s => cb(s.exists() ? s.data({ serverTimestamps: 'estimate' }) : null, s.metadata), err);
   },

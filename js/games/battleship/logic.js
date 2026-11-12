@@ -101,6 +101,74 @@ export function deadZone(shots) {
   return z;
 }
 
+// ---------- Бот ----------
+// shots — выстрелы бота ({c, r, sk}). Возвращает клетку для следующего выстрела.
+export function botShot(shots, diff, rnd = Math.random) {
+  const shot = new Map(shots.map(s => [s.c, s.r]));
+  const dz = deadZone(shots);
+  const sunkCells = new Set(), sunkSizes = [];
+  for (const s of shots) if (s.r === 's' && s.sk) { s.sk.forEach(c => sunkCells.add(c)); sunkSizes.push(s.sk.length); }
+  const hits = shots.filter(s => s.r === 'h' && !sunkCells.has(s.c)).map(s => s.c);
+  const avail = c => !shot.has(c) && !dz.has(c);
+  const free = [...Array(N * N).keys()].filter(avail);
+  const pick = arr => arr[Math.floor(rnd() * arr.length)];
+  if (!free.length) return -1;
+  if (diff === 'easy') { const any = [...Array(N * N).keys()].filter(c => !shot.has(c)); return pick(any); }
+
+  const left = FLEET.slice();
+  for (const s of sunkSizes) { const i = left.indexOf(s); if (i >= 0) left.splice(i, 1); }
+  const rc = c => [Math.floor(c / N), c % N];
+
+  if (diff === 'normal') {
+    if (hits.length) {
+      let cand = [];
+      if (hits.length >= 2) {
+        const [r0, k0] = rc(hits[0]);
+        const sameRow = hits.every(h => rc(h)[0] === r0), sameCol = hits.every(h => rc(h)[1] === k0);
+        if (sameRow || sameCol) {
+          const sorted = hits.slice().sort((a, b) => a - b), step = sameRow ? 1 : N;
+          const a = sorted[0] - step, b = sorted[sorted.length - 1] + step;
+          if (a >= 0 && (!sameRow || rc(a)[0] === r0)) cand.push(a);
+          if (b < N * N && (!sameRow || rc(b)[0] === r0)) cand.push(b);
+          cand = cand.filter(avail);
+        }
+      }
+      if (!cand.length) for (const h of hits) {
+        const [r, k] = rc(h);
+        for (const [dr, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const rr = r + dr, kk = k + dk;
+          if (rr >= 0 && rr < N && kk >= 0 && kk < N && avail(rr * N + kk)) cand.push(rr * N + kk);
+        }
+      }
+      if (cand.length) return pick(cand);
+    }
+    // ищет новые корабли без системы и иногда стреляет рядом с потопленными
+    return pick(rnd() < 0.5 ? free : [...Array(N * N).keys()].filter(c => !shot.has(c)));
+  }
+
+  // hard: карта вероятностей по всем возможным положениям оставшихся кораблей
+  const blocked = c => shot.get(c) === 'm' || sunkCells.has(c) || dz.has(c);
+  const hitSet = new Set(hits);
+  const score = new Array(N * N).fill(0);
+  for (const size of left) for (let start = 0; start < N * N; start++) for (const v of [false, true]) {
+    if (size === 1 && v) continue;
+    const cells = shipCells(start, size, v);
+    if (!cells || cells.some(blocked)) continue;
+    const covered = cells.filter(c => hitSet.has(c)).length;
+    if (hits.length && !covered) continue;
+    const w = hits.length ? Math.pow(30, covered) : 1;
+    for (const c of cells) if (!shot.has(c)) score[c] += w;
+  }
+  let pool = free;
+  if (!hits.length) {
+    const m = Math.min(...left);
+    if (m > 1) { const lat = free.filter(c => { const [r, k] = rc(c); return (r + k) % m === 0; }); if (lat.length) pool = lat; }
+  }
+  let best = -1, arr = [];
+  for (const c of pool) { if (score[c] > best) { best = score[c]; arr = [c]; } else if (score[c] === best) arr.push(c); }
+  return pick(arr.length ? arr : free);
+}
+
 export function newState(first, players = ['', '']) {
   return { kind: 'battleship', phase: 'place', first, cur: first, players, ready: [false, false], commit: ['', ''],
     shots0: [], shots1: [], pending: null, sc: [0, 0], moves: 0, over: false, winner: null, reason: '', note: '',

@@ -51,7 +51,17 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.totalWins is int
         && request.resource.data.totalWins <= (resource == null ? 0 : resource.data.get('totalWins', 0)) + 1);
-      allow delete: if false;
+      allow delete: if isAdmin() || (signedIn() && uid == me());
+    }
+
+    // Профиль: никнейм игрока
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && uid == me()
+        && request.resource.data.nick is string
+        && request.resource.data.nick.size() >= 2
+        && request.resource.data.nick.size() <= 20;
+      allow delete: if signedIn() && uid == me();
     }
 
     // Расстановка флота в «Морском бое»: видит и меняет только сам игрок
