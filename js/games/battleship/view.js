@@ -30,8 +30,8 @@ const CSS = `
 @keyframes bsPulse{50%{opacity:.35}}
 .bs-c.ghost{z-index:3;background:rgba(124,240,180,.55)}.bs-c.ghostbad{z-index:3;background:rgba(229,83,61,.6)}
 .bs-c.last{box-shadow:0 0 0 2px #fff inset}
-.bs-shipm{z-index:2;pointer-events:none;min-width:0;min-height:0;overflow:hidden;filter:drop-shadow(0 3px 2px rgba(0,0,0,.45));margin:1px}
-.bs-shipm svg{width:100%;height:100%;display:block}
+.bs-shipm{z-index:2;pointer-events:none;position:relative;min-width:0;min-height:0;filter:drop-shadow(0 3px 2px rgba(0,0,0,.45))}
+.bs-shipm svg{position:absolute;inset:1px;width:calc(100% - 2px);height:calc(100% - 2px);display:block}
 .bs-shipm.wreck{filter:grayscale(.7) brightness(.55) sepia(.6) hue-rotate(-25deg) drop-shadow(0 2px 2px rgba(0,0,0,.5))}
 .bs-shipm.ghosted{opacity:.5}
 .bs-dock{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}

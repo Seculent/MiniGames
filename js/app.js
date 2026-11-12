@@ -580,3 +580,4 @@ async function renderSolo(gameId) {
 }
 
 if (useMock) $('#mockBadge').hidden = false;
+import('./music.js').then(m => m.initMusic($('#musicBtn'), $('#musicVol'))).catch(() => { $('#musicBtn').hidden = true; });
