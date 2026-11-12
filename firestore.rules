@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+
+    // место s ('p0' или 'p1') в данных d занято текущим пользователем
+    function mine(d, s) { return d[s] != null && d[s].uid == me(); }
+
+    // место свободно или его хозяин не отмечался дольше 90 секунд
+    function stale(d, s) {
+      return d[s] == null || d[s].lastSeen < request.time - duration.value(90, 's');
+    }
+
+    // чужое живое место менять нельзя
+    function seatOk(s) {
+      return request.resource.data[s] == resource.data[s]
+        || mine(resource.data, s)
+        || (stale(resource.data, s)
+            && (request.resource.data[s] == null || request.resource.data[s].uid == me()));
+    }
+
+    match /tables/{tableId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && tableId.matches('^[A-Za-z]+-[0-9]+$')
+        && request.resource.data.p0 == null
+        && request.resource.data.p1 == null;
+      allow update: if signedIn()
+        && request.resource.data.game == resource.data.game
+        && request.resource.data.n == resource.data.n
+        && (mine(resource.data, 'p0') || mine(resource.data, 'p1')
+            || mine(request.resource.data, 'p0') || mine(request.resource.data, 'p1'))
+        && seatOk('p0') && seatOk('p1');
+      allow delete: if false;
+    }
+
+    match /stats/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && uid == me()
+        && request.resource.data.name is string
+        && request.resource.data.totalWins is int
+        && request.resource.data.totalWins <= (resource == null ? 0 : resource.data.get('totalWins', 0)) + 1;
+      allow delete: if false;
+    }
+  }
+}
